@@ -21,7 +21,7 @@ jobs:
           SERVERCHAN_SENDKEY: ${{ secrets.SERVERCHAN_SENDKEY }}
           QWEATHER_API_KEY: ${{ secrets.QWEATHER_API_KEY }}
           QWEATHER_API_HOST: ${{ secrets.QWEATHER_API_HOST }}
-          QWEATHER_LOCATION: "69003692"   # 扶沟县 Location ID
+          QWEATHER_LOCATION: "101181402"   # 扶沟县 Location ID
           TEST_DAY: ${{ github.event.inputs.test_day }}
         run: |
           # 【文本编辑区】
