@@ -18,10 +18,14 @@ jobs:
       - name: 获取天气并推送到微信
         env:
           START_DATE: "2026-11-17"
-          SERVERCHAN_SENDKEY: ${{ secrets.SERVERCHAN_SENDKEY }}
+          
           QWEATHER_API_KEY: ${{ secrets.QWEATHER_API_KEY }}
           QWEATHER_API_HOST: ${{ secrets.QWEATHER_API_HOST }}
           QWEATHER_LOCATION: "101181402"   # 扶沟县 Location ID
+          WECHAT_APPID: ${{ secrets.WECHAT_APPID }}
+          WECHAT_SECRET: ${{ secrets.WECHAT_SECRET }}
+          WECHAT_OPENID: ${{ secrets.WECHAT_OPENID }}
+          WECHAT_TEMPLATE_ID: ${{ secrets.WECHAT_TEMPLATE_ID }}
           TEST_DAY: ${{ github.event.inputs.test_day }}
         run: |
           # 【文本编辑区】
@@ -71,7 +75,31 @@ jobs:
           MSG=$(printf "%s\n\n%s" "${WEATHER}" "${EXTRA}")
           TITLE="天气提醒 | ${TODAY} | 第${DAY_IN_CYCLE}天"
 
-          # 4. 发送到 Server酱
-          curl -sS -X POST "https://sctapi.ftqq.com/${SERVERCHAN_SENDKEY}.send" \
-            --data-urlencode "title=${TITLE}" \
-            --data-urlencode "desp=${MSG}"
+                    # 4. 获取 access_token 并发送微信模板消息
+          TOKEN_JSON=$(curl -s "https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid=${WECHAT_APPID}&secret=${WECHAT_SECRET}")
+          ACCESS_TOKEN=$(echo "$TOKEN_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get('access_token',''))")
+
+          if [ -z "$ACCESS_TOKEN" ]; then
+            echo "获取 access_token 失败，返回：${TOKEN_JSON}"
+            exit 1
+          fi
+
+          # 用 Python 构造合法的 JSON（自动处理中文和换行转义）
+          JSON_BODY=$(python3 -c "
+          import sys, json
+          print(json.dumps({
+          'touser': sys.argv[1],
+          'template_id': sys.argv[2],
+          'data': {
+            'weather': {'value': sys.argv[3]},
+            'extra':   {'value': sys.argv[4]}
+                   }
+                            }, ensure_ascii=False))
+          " "${WECHAT_OPENID}" "${WECHAT_TEMPLATE_ID}" "${WEATHER}" "${EXTRA}")
+
+          SEND_RESULT=$(curl -sS -X POST "https://api.weixin.qq.com/cgi-bin/message/template/send?access_token=${ACCESS_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "$JSON_BODY")
+
+          echo "发送结果：${SEND_RESULT}"
+         
