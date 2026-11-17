@@ -1,8 +1,8 @@
-name: 每日天气推送 (Server酱 · 16天周期)
+name: 每日天气推送 (和风天气 · 16天周期)
 
 on:
   schedule:
-    # UTC 23:00 = 北京时间次日 07:00
+    # 北京时间 07:40 = UTC 23:40（前一天）
     - cron: '40 23 * * *'
   workflow_dispatch:
     inputs:
@@ -17,20 +17,22 @@ jobs:
     steps:
       - name: 获取天气并推送到微信
         env:
-          CITY: "34.06,114.39"                                  # ← 改成你的城市
-          START_DATE: "2026-11-17"                       # ← 周期第1天日期，格式 YYYY-MM-DD
+          START_DATE: "2026-11-17"
           SERVERCHAN_SENDKEY: ${{ secrets.SERVERCHAN_SENDKEY }}
+          QWEATHER_API_KEY: ${{ secrets.QWEATHER_API_KEY }}
+          QWEATHER_API_HOST: ${{ secrets.QWEATHER_API_HOST }}
+          QWEATHER_LOCATION: "69003692"   # ← 换成扶沟县的 Location ID
           TEST_DAY: ${{ github.event.inputs.test_day }}
         run: |
           # ============================================================
           # 【文本编辑区】共 9 段：
-          # TEXTS[0] ~ TEXTS[7] 对应周期第 1~8 天，每天顺序使用
-          # TEXTS[8] 对应周期第 9~16 天，统一使用
+          # TEXTS[0] ~ TEXTS[7] 对应周期第 1~8 天
+          # TEXTS[8] 对应周期第 9~16 天
           # 只替换引号里的中文，保持 9 个元素、顺序不变。
-          # 文本中不要出现英文双引号 " 和反引号 `。
+          # 不要出现英文双引号 " 和反引号 `。
           # ============================================================
           TEXTS=(
-            "第一天加油。"
+            "第1天附加文本，请替换。"
             "第2天附加文本，请替换。"
             "第3天附加文本，请替换。"
             "第4天附加文本，请替换。"
@@ -41,50 +43,57 @@ jobs:
             "第9到16天统一使用的文本，请替换。"
           )
           # ============================================================
-          # 【文本编辑区结束】以下逻辑一般不用改
+          # 【文本编辑区结束】
           # ============================================================
 
-          # 取北京时间日期，避免 UTC 23:00 触发时日期差一天
           TODAY=$(TZ='Asia/Shanghai' date +%F)
 
-          # 计算当前是周期第几天（1~16）
           if [ -n "$TEST_DAY" ]; then
             DAY_IN_CYCLE="$TEST_DAY"
             echo "手动测试：周期第 ${DAY_IN_CYCLE} 天"
           else
             DIFF_DAYS=$(( ( $(date -d "$TODAY" +%s) - $(date -d "$START_DATE" +%s) ) / 86400 ))
-
-            # 今天早于起始日则不推送
             if [ "$DIFF_DAYS" -lt 0 ]; then
-              echo "今天(${TODAY})早于起始日(${START_DATE})，本次不推送。"
+              echo "今天(${TODAY})早于起始日(${START_DATE})，不推送。"
               exit 0
             fi
-
-            # 对16取模再+1，得到 1~16，第17天回到第1天
             DAY_IN_CYCLE=$(( DIFF_DAYS % 16 + 1 ))
             echo "今天 ${TODAY}，周期第 ${DAY_IN_CYCLE} 天"
           fi
 
-          # 第1~8天取对应文本，第9~16天统一取第9段
           if [ "$DAY_IN_CYCLE" -le 8 ]; then
             EXTRA="${TEXTS[$((DAY_IN_CYCLE - 1))]}"
           else
             EXTRA="${TEXTS[8]}"
           fi
 
-          # 获取天气
-          WEATHER=$(curl -s "https://wttr.in/${CITY}?format=%l:+%c+%t+%w+%p&lang=zh")
-          if [ -z "$WEATHER" ]; then
-            WEATHER="获取天气信息失败，请检查城市名称。"
-          fi
+          # 调用和风天气 3 天预报，取今明两天
+          WEATHER=$(curl -s --compressed \
+            "https://${QWEATHER_API_HOST}/v7/weather/3d?location=${QWEATHER_LOCATION}&key=${QWEATHER_API_KEY}" \
+            | python3 -c '
+import sys, json
+d = json.load(sys.stdin)
+if d.get("code") != "200":
+    print("获取天气失败，和风返回码：" + str(d.get("code")))
+else:
+    daily = d["daily"]
+    out = []
+    for i, label in enumerate(["今天", "明天"]):
+        day = daily[i]
+        out.append("{}：{}，{}~{}°C，{}km/h风，湿度{}%".format(
+            label,
+            day["textDay"],
+            day["tempMin"],
+            day["tempMax"],
+            day["windSpeedDay"],
+            day["humidity"]
+        ))
+    print("\n".join(out))
+')
 
-          # 拼接正文：天气 + 空行 + 周期文本
           MSG="${WEATHER}"$'\n\n'"${EXTRA}"
-
-          # 标题带日期和周期天数，方便核对
           TITLE="天气提醒 | ${TODAY} | 第${DAY_IN_CYCLE}天"
 
-          # 调用 Server酱 Turbo API
           curl -sS -X POST "https://sctapi.ftqq.com/${SERVERCHAN_SENDKEY}.send" \
             --data-urlencode "title=${TITLE}" \
             --data-urlencode "desp=${MSG}"
